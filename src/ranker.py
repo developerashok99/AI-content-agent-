@@ -12,6 +12,7 @@ MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 # (a first-ever run with an empty dedup store can otherwise send 100+ articles at once).
 MAX_ARTICLES = 50
 SUMMARY_CHARS = 150
+MAX_TREND_ITEMS = 30
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,16 @@ AI, or hardware stories that only tangentially mention gaming); genuinely trendi
 review-bomb dramas, viral community reactions); and easy to turn into a punchy, curiosity-driven hook in the \
 first 3 seconds.
 
+You'll also be given a list of today's trending gaming videos on YouTube in India/US/Japan. Use it as a signal \
+for what this audience is actually watching/searching right now — favor articles that connect to something \
+already trending there, when there's a reasonable match.
+
+You'll also be given a list of stories already covered in the last two weeks — do NOT pick the same underlying \
+story again even if it's a different article/URL/source.
+
+You may also be given notes on how past picks performed — use them to lean toward topics/angles that have \
+worked before and away from ones that flopped, when relevant.
+
 Avoid: routine deals/sales roundups, minor patch notes, and stories with little emotional or curiosity hook.
 
 Respond with ONLY a JSON object, no other text, in this exact shape:
@@ -33,7 +44,12 @@ Respond with ONLY a JSON object, no other text, in this exact shape:
 """
 
 
-def rank(articles: list[Article]) -> dict | None:
+def rank(
+    articles: list[Article],
+    trend_context: list[str] | None = None,
+    recent_topics: list[str] | None = None,
+    feedback_notes: list[str] | None = None,
+) -> dict | None:
     if not articles:
         return None
 
@@ -45,12 +61,28 @@ def rank(articles: list[Article]) -> dict | None:
         for a in candidates
     )
 
+    sections = [f"Today's new articles:\n\n{listing}"]
+
+    if trend_context:
+        trend_listing = "\n".join(f"- {t}" for t in trend_context[:MAX_TREND_ITEMS])
+        sections.append(f"Today's trending gaming YouTube videos (IN/US/JP):\n\n{trend_listing}")
+
+    if recent_topics:
+        recent_listing = "\n".join(f"- {t}" for t in recent_topics)
+        sections.append(f"Stories already covered in the last 14 days (do not repeat):\n\n{recent_listing}")
+
+    if feedback_notes:
+        feedback_listing = "\n".join(f"- {n}" for n in feedback_notes)
+        sections.append(f"Notes on how past picks performed:\n\n{feedback_listing}")
+
+    user_content = "\n\n---\n\n".join(sections)
+
     try:
         response = client.chat.completions.create(
             model=MODEL,
             messages=[
                 {"role": "system", "content": RANKER_SYSTEM_PROMPT},
-                {"role": "user", "content": f"Today's new articles:\n\n{listing}"},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.3,
             response_format={"type": "json_object"},

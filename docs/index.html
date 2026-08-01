@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gaming Reel Agent — Status</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1a1d23;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+    --accent: #6d28d9;
+    --ok: #16a34a;
+    --warn: #dc2626;
+    --idle: #6b7280;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115;
+      --card: #171a21;
+      --text: #e7e9ee;
+      --muted: #9aa1ab;
+      --border: #2a2e37;
+      --accent: #a78bfa;
+      --ok: #4ade80;
+      --warn: #f87171;
+      --idle: #9aa1ab;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 1rem;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0.5rem 0 1rem; }
+  .status-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+  .status-row { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  .status-row + .status-row { margin-top: 0.6rem; }
+  .label { color: var(--muted); font-size: 0.85rem; }
+  .value { font-weight: 600; text-align: right; }
+  .pill {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .pill.success { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .pill.failed { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .pill.no_new_articles { background: color-mix(in srgb, var(--idle) 18%, transparent); color: var(--idle); }
+  .entry {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+  }
+  .entry summary {
+    cursor: pointer;
+    padding: 0.85rem 1.1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    list-style: none;
+  }
+  .entry summary::-webkit-details-marker { display: none; }
+  .entry summary .title { font-weight: 600; }
+  .entry summary .date { color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
+  .entry-body { padding: 0 1.1rem 1.1rem; border-top: 1px solid var(--border); }
+  .entry-body h4 { margin: 0.9rem 0 0.3rem; font-size: 0.85rem; color: var(--accent); }
+  .entry-body p, .entry-body pre { margin: 0.2rem 0; white-space: pre-wrap; word-break: break-word; font-size: 0.92rem; }
+  .entry-body a { color: var(--accent); }
+  .variant { border: 1px dashed var(--border); border-radius: 8px; padding: 0.7rem 0.9rem; margin: 0.5rem 0; }
+  .variant .field { margin-bottom: 0.4rem; }
+  .variant .field b { color: var(--muted); font-weight: 600; }
+  .trend-list, .feedback-list { margin: 0.2rem 0; padding-left: 1.1rem; font-size: 0.88rem; color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 2rem 0; }
+  .error-text { color: var(--warn); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎮 Gaming Reel Agent</h1>
+
+  <div class="status-card" id="status-card">
+    <div class="status-row"><span class="label">Last run</span><span class="value" id="last-run">Loading…</span></div>
+    <div class="status-row"><span class="label">Result</span><span class="value" id="last-status">—</span></div>
+    <div class="status-row"><span class="label">Next scheduled run</span><span class="value" id="next-run">—</span></div>
+  </div>
+
+  <div id="history-list"></div>
+</div>
+
+<script>
+const CRON_HOUR_UTC = 21;
+const CRON_MINUTE_UTC = 30;
+
+function nextRunFrom(now) {
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), CRON_HOUR_UTC, CRON_MINUTE_UTC, 0));
+  if (next <= now) next.setUTCDate(next.getUTCDate() + 1);
+  return next;
+}
+
+function relativeTime(from, to) {
+  const diffMs = to - from;
+  const abs = Math.abs(diffMs);
+  const mins = Math.round(abs / 60000);
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  const parts = [];
+  if (hrs) parts.push(hrs + "h");
+  parts.push(rem + "m");
+  return parts.join(" ");
+}
+
+function statusLabel(status) {
+  return { success: "✅ Success", failed: "❌ Failed", no_new_articles: "😴 No new articles" }[status] || status;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement("div");
+  div.textContent = str ?? "";
+  return div.innerHTML;
+}
+
+function renderVariant(v) {
+  return `<div class="variant">
+    <div class="field"><b>HOOK</b><br>${escapeHtml(v.hook)}</div>
+    <div class="field"><b>BEAT 1</b><br>${escapeHtml(v.beat1)}</div>
+    <div class="field"><b>BEAT 2</b><br>${escapeHtml(v.beat2)}</div>
+    <div class="field"><b>OUTRO</b><br>${escapeHtml(v.outro)}</div>
+    <div class="field"><b>VISUALS</b><br>${escapeHtml(v.visuals)}</div>
+    <div class="field"><b>CAPTION</b><br>${escapeHtml(v.caption)}</div>
+    <div class="field"><b>HASHTAGS</b><br>${escapeHtml(v.hashtags)}</div>
+  </div>`;
+}
+
+function renderEntry(entry) {
+  const date = new Date(entry.date);
+  const dateLabel = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const title = entry.chosen ? entry.chosen.title : (entry.error || statusLabel(entry.status));
+
+  let body = "";
+  if (entry.chosen) {
+    body += `<h4>Chosen story</h4><p><a href="${escapeHtml(entry.chosen.url)}" target="_blank" rel="noopener">${escapeHtml(entry.chosen.source)} — ${escapeHtml(entry.chosen.title)}</a></p>`;
+    body += `<h4>Why</h4><p>${escapeHtml(entry.chosen.reasoning)}</p>`;
+  }
+  if (entry.error) {
+    body += `<h4>Error</h4><p class="error-text">${escapeHtml(entry.error)}</p>`;
+  }
+  if (entry.trend_context && entry.trend_context.length) {
+    body += `<h4>Trend signals used</h4><ul class="trend-list">${entry.trend_context.map(t => `<li>${escapeHtml(t)}</li>`).join("")}</ul>`;
+  }
+  if (entry.variants && entry.variants.length) {
+    body += `<h4>Script variants</h4>` + entry.variants.map(renderVariant).join("");
+  }
+  if (entry.feedback && entry.feedback.length) {
+    body += `<h4>Feedback</h4><ul class="feedback-list">${entry.feedback.map(f => `<li>${escapeHtml(f.text)}</li>`).join("")}</ul>`;
+  }
+
+  return `<details class="entry">
+    <summary>
+      <span class="title">${escapeHtml(title)} <span class="pill ${entry.status}">${statusLabel(entry.status)}</span></span>
+      <span class="date">${dateLabel}</span>
+    </summary>
+    <div class="entry-body">${body}</div>
+  </details>`;
+}
+
+async function main() {
+  const now = new Date();
+  document.getElementById("next-run").textContent = "in " + relativeTime(now, nextRunFrom(now));
+
+  let history = [];
+  try {
+    const res = await fetch("data/history.json", { cache: "no-store" });
+    history = await res.json();
+  } catch (e) {
+    document.getElementById("last-run").textContent = "Could not load history.json";
+    return;
+  }
+
+  if (!history.length) {
+    document.getElementById("last-run").textContent = "No runs yet";
+    document.getElementById("history-list").innerHTML = '<p class="empty">Nothing here yet — check back after the first nightly run.</p>';
+    return;
+  }
+
+  history.sort((a, b) => new Date(b.date) - new Date(a.date));
+  const latest = history[0];
+  const latestDate = new Date(latest.date);
+  document.getElementById("last-run").textContent = relativeTime(latestDate, now) + " ago";
+  const statusEl = document.getElementById("last-status");
+  statusEl.innerHTML = `<span class="pill ${latest.status}">${statusLabel(latest.status)}</span>`;
+
+  document.getElementById("history-list").innerHTML = history.map(renderEntry).join("");
+}
+
+main();
+</script>
+</body>
+</html>
