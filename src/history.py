@@ -60,4 +60,7 @@ def new_entry(status: str, error: str | None = None) -> dict:
         "trend_context": [],
         "variants": [],
         "feedback": [],
+        "sources": [],
+        "services": {},
+        "feedback_collected": 0,
     }

@@ -23,13 +23,13 @@ def _save_offset(update_id: int) -> None:
         json.dump({"last_update_id": update_id}, f, indent=2)
 
 
-def collect_feedback(entries: list[dict]) -> bool:
+def collect_feedback(entries: list[dict]) -> int:
     """Polls Telegram for replies to past script messages and appends them to the
-    matching history entry's feedback list. Returns True if any entry changed."""
+    matching history entry's feedback list. Returns how many replies were matched."""
     offset = _load_offset()
     updates = telegram.get_updates(offset)
     if not updates:
-        return False
+        return 0
 
     # Keyed by (chat_id, message_id) since message_id is only unique within a chat.
     message_map = {}
@@ -38,7 +38,7 @@ def collect_feedback(entries: list[dict]) -> bool:
             for sent in variant.get("telegram_message_ids", []):
                 message_map[(sent["chat_id"], sent["message_id"])] = entry
 
-    changed = False
+    matched = 0
     max_update_id = offset or 0
     for update in updates:
         max_update_id = max(max_update_id, update["update_id"])
@@ -58,8 +58,8 @@ def collect_feedback(entries: list[dict]) -> bool:
         target_entry.setdefault("feedback", []).append(
             {"text": text, "chat_id": chat_id, "at": datetime.now(timezone.utc).isoformat()}
         )
-        changed = True
+        matched += 1
         logger.info("Matched feedback to \"%s\": %s", target_entry["chosen"]["title"], text)
 
     _save_offset(max_update_id)
-    return changed
+    return matched

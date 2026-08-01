@@ -19,17 +19,21 @@ SCRAPER_MODULES = {
 }
 
 
-def scrape_all() -> list[Article]:
+def scrape_all() -> tuple[list[Article], list[dict]]:
     articles: list[Article] = []
+    source_stats: list[dict] = []
     for module in (gamespot, gamerant, pcgamer, pcgamesn):
         try:
             fetched = module.fetch()
+            ok = True
         except Exception:
             logger.exception("Scraper %s raised unexpectedly", module.SOURCE)
             fetched = []
+            ok = False
         logger.info("%s: fetched %d articles", module.SOURCE, len(fetched))
+        source_stats.append({"name": module.SOURCE, "count": len(fetched), "ok": ok})
         articles.extend(fetched)
-    return articles
+    return articles, source_stats
 
 
 def get_full_body(article: Article) -> str:
@@ -72,20 +76,29 @@ def format_variant_message(variant: dict) -> str:
     )
 
 
+def fail(entries: list[dict], entry: dict, reason: str) -> int:
+    entry["status"] = "failed"
+    entry["error"] = reason
+    logger.error(reason)
+    notify_failure(reason)
+    history.append_entry(entries, entry)
+    history.save_history(entries)
+    return 1
+
+
 def run() -> int:
     entries = history.load_history()
+    entry = history.new_entry("failed", "run did not complete")
 
-    if feedback.collect_feedback(entries):
+    entry["feedback_collected"] = feedback.collect_feedback(entries)
+    if entry["feedback_collected"]:
         history.save_history(entries)
-        logger.info("Recorded new feedback from Telegram replies")
+        logger.info("Recorded %d new feedback replies", entry["feedback_collected"])
 
-    all_articles = scrape_all()
+    all_articles, source_stats = scrape_all()
+    entry["sources"] = source_stats
     if not all_articles:
-        logger.warning("No articles fetched from any source, aborting run")
-        notify_failure("all scrapers returned nothing")
-        history.append_entry(entries, history.new_entry("failed", "all scrapers returned nothing"))
-        history.save_history(entries)
-        return 1
+        return fail(entries, entry, "all scrapers returned nothing")
 
     seen = state.load_seen()
     new_articles = [a for a in all_articles if a.url not in seen]
@@ -93,21 +106,21 @@ def run() -> int:
 
     if not new_articles:
         logger.info("No new articles tonight, nothing to do")
-        history.append_entry(entries, history.new_entry("no_new_articles"))
+        entry["status"] = "no_new_articles"
+        entry["error"] = None
+        history.append_entry(entries, entry)
         history.save_history(entries)
         return 0
 
     trend_context = trends.fetch_trend_context()
+    entry["services"]["youtube_trends"] = {"count": len(trend_context)}
     recent_topics = history.recent_topics(entries)
     feedback_notes = history.recent_feedback(entries)
 
     ranking = ranker.rank(new_articles, trend_context, recent_topics, feedback_notes)
+    entry["services"]["groq_ranker"] = {"ok": ranking is not None}
     if ranking is None:
-        logger.error("Ranking failed, aborting run")
-        notify_failure("Groq ranking call failed")
-        history.append_entry(entries, history.new_entry("failed", "Groq ranking call failed"))
-        history.save_history(entries)
-        return 1
+        return fail(entries, entry, "Groq ranking call failed")
 
     chosen = next(a for a in new_articles if a.url == ranking["chosen_url"])
     logger.info("Chosen story: %s (%s)", chosen.title, chosen.source)
@@ -115,26 +128,23 @@ def run() -> int:
 
     full_body = get_full_body(chosen)
     variants = scriptwriter.write_scripts(chosen, full_body, trend_context)
+    entry["services"]["groq_scriptwriter"] = {"ok": bool(variants)}
     if not variants:
-        logger.error("Script generation failed, aborting run")
-        notify_failure("Groq scriptwriting call failed")
-        history.append_entry(entries, history.new_entry("failed", "Groq scriptwriting call failed"))
-        history.save_history(entries)
-        return 1
+        return fail(entries, entry, "Groq scriptwriting call failed")
 
+    total_recipients = len(telegram.chat_ids())
     lead_sent = telegram.send_to_all(
         format_lead_message(chosen, ranking.get("reasoning", ""), trend_context)
     )
+    entry["services"]["telegram"] = {"reached": len(lead_sent), "total": total_recipients}
     if not lead_sent:
-        logger.error("Telegram delivery failed for every recipient, aborting run")
-        history.append_entry(entries, history.new_entry("failed", "Telegram delivery failed"))
-        history.save_history(entries)
-        return 1
+        return fail(entries, entry, "Telegram delivery failed for every recipient")
 
     for variant in variants:
         variant["telegram_message_ids"] = telegram.send_to_all(format_variant_message(variant))
 
-    entry = history.new_entry("success")
+    entry["status"] = "success"
+    entry["error"] = None
     entry["chosen"] = {
         "title": chosen.title,
         "url": chosen.url,
