@@ -8,6 +8,11 @@ from src.models import Article
 
 MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+# Keeps the ranking request comfortably under free-tier tokens-per-minute limits
+# (a first-ever run with an empty dedup store can otherwise send 100+ articles at once).
+MAX_ARTICLES = 50
+SUMMARY_CHARS = 150
+
 logger = logging.getLogger(__name__)
 
 RANKER_SYSTEM_PROMPT = """You are a gaming-industry trend analyst for a short-form video (Instagram Reels) \
@@ -34,9 +39,10 @@ def rank(articles: list[Article]) -> dict | None:
 
     client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
+    candidates = articles[:MAX_ARTICLES]
     listing = "\n".join(
-        f"- url: {a.url}\n  source: {a.source}\n  title: {a.title}\n  summary: {a.summary[:300]}"
-        for a in articles
+        f"- url: {a.url}\n  source: {a.source}\n  title: {a.title}\n  summary: {a.summary[:SUMMARY_CHARS]}"
+        for a in candidates
     )
 
     try:
@@ -55,7 +61,7 @@ def rank(articles: list[Article]) -> dict | None:
         return None
 
     chosen_url = result.get("chosen_url")
-    if not chosen_url or not any(a.url == chosen_url for a in articles):
+    if not chosen_url or not any(a.url == chosen_url for a in candidates):
         logger.error("Ranker returned an unknown URL: %s", chosen_url)
         return None
 
