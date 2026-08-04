@@ -10,7 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 def _base_url() -> str:
-    token = os.environ["TELEGRAM_BOT_TOKEN"]
+    # .strip() guards against a trailing space/newline sneaking into the secret
+    # value when it's copy-pasted into GitHub Actions Secrets — Telegram's API
+    # rejects the token outright (404) if that happens, so any run right after
+    # setup can silently look like a Telegram outage instead of a typo.
+    token = os.environ["TELEGRAM_BOT_TOKEN"].strip()
     return f"https://api.telegram.org/bot{token}"
 
 

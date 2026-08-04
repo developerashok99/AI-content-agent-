@@ -53,7 +53,7 @@ def rank(
     if not articles:
         return None
 
-    client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    client = Groq(api_key=os.environ["GROQ_API_KEY"].strip())
 
     candidates = articles[:MAX_ARTICLES]
     listing = "\n".join(

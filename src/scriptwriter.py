@@ -42,7 +42,7 @@ Respond with ONLY a JSON object, no other text, in this exact shape:
 
 
 def write_scripts(article: Article, full_body: str, trend_context: list[str] | None = None) -> list[dict] | None:
-    client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    client = Groq(api_key=os.environ["GROQ_API_KEY"].strip())
 
     sections = [
         f"Title: {article.title}\n"

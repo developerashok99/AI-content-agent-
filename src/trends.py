@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_trend_context() -> list[str]:
-    api_key = os.environ.get("YOUTUBE_API_KEY")
+    api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
     if not api_key:
         logger.warning("YOUTUBE_API_KEY not set, skipping trend context")
         return []
