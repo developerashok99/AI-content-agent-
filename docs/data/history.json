@@ -2177,5 +2177,45 @@
       }
     },
     "feedback_collected": 0
+  },
+  {
+    "date": "2026-08-31T21:37:44.070408+00:00",
+    "status": "failed",
+    "error": "Groq ranking call failed",
+    "chosen": null,
+    "trend_context": [],
+    "variants": [],
+    "feedback": [],
+    "sources": [
+      {
+        "name": "GameSpot",
+        "count": 30,
+        "ok": true
+      },
+      {
+        "name": "GameRant",
+        "count": 22,
+        "ok": true
+      },
+      {
+        "name": "PC Gamer",
+        "count": 50,
+        "ok": true
+      },
+      {
+        "name": "PCGamesN",
+        "count": 75,
+        "ok": true
+      }
+    ],
+    "services": {
+      "youtube_trends": {
+        "count": 30
+      },
+      "groq_ranker": {
+        "ok": false
+      }
+    },
+    "feedback_collected": 0
   }
 ]
